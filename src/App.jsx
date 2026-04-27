@@ -9,6 +9,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   CartesianGrid,
+  LabelList,
 } from "recharts";
 
 const CONTRACT = import.meta.env.VITE_CONTRACT;
@@ -120,7 +121,14 @@ export default function App() {
     });
   }
 
-  function getWeekRange(timestamp) {
+  function dateKey(d) {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function getMonday(timestamp) {
     const d = new Date(timestamp);
     const day = d.getDay();
 
@@ -128,12 +136,18 @@ export default function App() {
     monday.setDate(d.getDate() - ((day + 6) % 7));
     monday.setHours(0, 0, 0, 0);
 
+    return monday;
+  }
+
+  function getWeekRange(timestamp) {
+    const monday = getMonday(timestamp);
+
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     sunday.setHours(23, 59, 59, 999);
 
     return {
-      key: monday.toISOString().slice(0, 10),
+      key: dateKey(monday),
       label: `${formatDate(monday)} - ${formatDate(sunday)}`,
     };
   }
@@ -156,14 +170,60 @@ export default function App() {
       return getWeekRange(timestamp);
     }
 
-    const key = d.toISOString().slice(0, 10);
+    const key = dateKey(d);
     return {
       key,
       label: formatDate(d),
     };
   }
 
-  const fullSummaryChart = Object.values(
+  function buildDailyWeekChart(txs, currentPage) {
+    if (txs.length === 0) return [];
+
+    const weekMap = {};
+
+    txs.forEach((tx) => {
+      const monday = getMonday(tx.timestamp);
+      const weekKey = dateKey(monday);
+
+      if (!weekMap[weekKey]) {
+        weekMap[weekKey] = {
+          weekKey,
+          monday,
+          label: getWeekRange(tx.timestamp).label,
+          days: Array.from({ length: 7 }, (_, i) => {
+            const d = new Date(monday);
+            d.setDate(monday.getDate() + i);
+
+            return {
+              key: dateKey(d),
+              period: formatDate(d),
+              count: 0,
+              volume: 0,
+            };
+          }),
+        };
+      }
+
+      const txDateKey = dateKey(new Date(tx.timestamp));
+      const day = weekMap[weekKey].days.find((x) => x.key === txDateKey);
+
+      if (day) {
+        day.count += 1;
+        day.volume += Number(tx.value || 0);
+      }
+    });
+
+    const weeks = Object.values(weekMap).sort((a, b) =>
+      a.weekKey.localeCompare(b.weekKey)
+    );
+
+    return weeks[currentPage - 1]?.days || [];
+  }
+
+  const weeklyDayChart = buildDailyWeekChart(filteredTxs, chartPage);
+
+  const groupedSummaryChart = Object.values(
     filteredTxs.reduce((acc, tx) => {
       const group = getGroupData(tx.timestamp, groupBy);
 
@@ -181,18 +241,25 @@ export default function App() {
     }, {})
   ).sort((a, b) => a.key.localeCompare(b.key));
 
-  const CHART_PAGE_SIZE =
-    groupBy === "day" ? 7 :
-    groupBy === "week" ? 7 :
-    fullSummaryChart.length;
+  const dayWeekCount =
+    new Set(
+      filteredTxs.map((tx) => dateKey(getMonday(tx.timestamp)))
+    ).size || 1;
+
+  const CHART_PAGE_SIZE = groupBy === "week" ? 7 : groupedSummaryChart.length;
 
   const chartTotalPages =
-    Math.ceil(fullSummaryChart.length / CHART_PAGE_SIZE) || 1;
+    groupBy === "day"
+      ? dayWeekCount
+      : Math.ceil(groupedSummaryChart.length / CHART_PAGE_SIZE) || 1;
 
-  const summaryChart = fullSummaryChart.slice(
-    (chartPage - 1) * CHART_PAGE_SIZE,
-    chartPage * CHART_PAGE_SIZE
-  );
+  const summaryChart =
+    groupBy === "day"
+      ? weeklyDayChart
+      : groupedSummaryChart.slice(
+          (chartPage - 1) * CHART_PAGE_SIZE,
+          chartPage * CHART_PAGE_SIZE
+        );
 
   return (
     <div style={styles.page}>
@@ -251,15 +318,17 @@ export default function App() {
             <BarChart data={summaryChart}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
               <Tooltip
                 formatter={(value, name) => [
                   name === "count" ? `${value} tx` : value,
                   name,
                 ]}
               />
-              <Bar dataKey="count" radius={[10, 10, 0, 0]} />
-            </BarChart>
+              <Bar dataKey="count" radius={[10, 10, 0, 0]}>
+              <LabelList dataKey="count" position="top" />
+              </Bar>
+              </BarChart>
           </ResponsiveContainer>
 
           {(groupBy === "day" || groupBy === "week") && (
@@ -272,7 +341,8 @@ export default function App() {
               </Button>
 
               <span style={styles.pageText}>
-                Period {chartPage} / {chartTotalPages}
+                {groupBy === "day" ? "Week Period" : "Period"} {chartPage} /{" "}
+                {chartTotalPages}
               </span>
 
               <Button
