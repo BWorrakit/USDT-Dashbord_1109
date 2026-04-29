@@ -285,7 +285,6 @@ export default function App() {
         </div>
 
         <div style={styles.cards}>
-          <Card title="Balance" value={`${Number(balance).toFixed(4)} JFIN`} />
           <Card title="USDT Outgoing Tx" value={filteredTxs.length} />
           <Card
             title="Volume USDT"
@@ -293,7 +292,6 @@ export default function App() {
               maximumFractionDigits: 2,
             })} USDT`}
           />
-          <Card title="Page Size" value={PAGE_SIZE} />
         </div>
 
         <Section title="USDT tx Summary">
